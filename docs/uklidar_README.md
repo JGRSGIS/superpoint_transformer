@@ -2,9 +2,14 @@
 
 Integration of UK colourised LiDAR point clouds (EA National LIDAR Programme, Bluesky, MLS, etc.) with the [Superpoint Transformer](https://github.com/drprojects/superpoint_transformer) architecture for semantic segmentation.
 
-Uses DALES-compatible class definitions (8 classes) so you can run inference with a pretrained DALES checkpoint out of the box.
+Supports two pretrained checkpoint targets out of the box:
 
-## Classes
+| Target | Classes | Model | Use case |
+|--------|---------|-------|----------|
+| **DALES** (default) | 8 | spt-64 | Aerial / ALS LiDAR |
+| **KITTI-360** | 19 | spt-128 | Mobile mapping / MLS LiDAR |
+
+## DALES classes (default)
 
 | ID | Class       | ASPRS codes mapped |
 |----|-------------|--------------------|
@@ -17,7 +22,24 @@ Uses DALES-compatible class definitions (8 classes) so you can run inference wit
 | 6  | Poles       | —                  |
 | 7  | Buildings   | 6                  |
 
-All other ASPRS codes (0, 1, 7, 9, 17, 18, 20) are mapped to **void** and excluded from metrics.
+All other ASPRS codes (0, 1, 7, 9, 17, 18, 20) are mapped to **void** (label 8) and excluded from metrics.
+
+## KITTI-360 classes
+
+| ID | Class         | ID | Class      |
+|----|---------------|----|------------|
+| 0  | road          | 10 | sky        |
+| 1  | sidewalk      | 11 | person     |
+| 2  | building      | 12 | rider      |
+| 3  | wall          | 13 | car        |
+| 4  | fence         | 14 | truck      |
+| 5  | pole          | 15 | bus        |
+| 6  | traffic_light | 16 | train      |
+| 7  | traffic_sign  | 17 | motorcycle |
+| 8  | vegetation    | 18 | bicycle    |
+| 9  | terrain       |    |            |
+
+ASPRS mapping: Ground (2) → terrain, Vegetation (3–5) → vegetation, Building (6) → building, Permanent Structure (20) → wall. All other ASPRS codes map to **void** (label 19).
 
 ## Directory structure
 
@@ -62,13 +84,22 @@ python src/train.py \
     trainer.max_epochs=0
 ```
 
-### Inference with a DALES checkpoint
+### Inference with a DALES checkpoint (default)
 
 ```bash
 python src/eval.py \
     experiment=semantic/uklidar \
     datamodule.data_dir=/path/to/data \
     ckpt_path=/path/to/dales_checkpoint.ckpt
+```
+
+### Inference with a KITTI-360 checkpoint
+
+```bash
+python src/eval.py \
+    experiment=semantic/uklidar \
+    datamodule.data_dir=/path/to/data \
+    ckpt_path=/path/to/kitti360_checkpoint.ckpt
 ```
 
 ### Training from scratch
@@ -95,17 +126,18 @@ datamodule.xy_tiling=3
 
 # Use a different model size
 model=semantic/spt-2.yaml    # smaller
-model=semantic/spt-64.yaml   # larger
+model=semantic/spt-64.yaml   # larger (DALES default)
+model=semantic/spt-128.yaml  # KITTI-360 default
 ```
 
 ## Python / Notebook usage
 
-### Reading a single tile
+### Reading a single tile (DALES target — default)
 
 ```python
 from src.datasets.uklidar import read_uklidar_tile
 
-# Read a LAS/LAZ file into an SPT Data object
+# Read a LAS/LAZ file into an SPT Data object (DALES labels by default)
 data = read_uklidar_tile("data/uklidar/raw/test/my_tile.laz")
 
 print(data)
@@ -117,6 +149,18 @@ print(data.intensity.shape)  # torch.Size([N, 1])  — normalised to [0, 1]
 print(data.y.shape)          # torch.Size([N])     — semantic labels
 ```
 
+### Reading a single tile (KITTI-360 target)
+
+```python
+from src.datasets.uklidar import read_uklidar_tile
+
+# Read with KITTI-360 label mapping (19 classes, void=19)
+data = read_uklidar_tile(
+    "data/uklidar/raw/test/my_tile.laz",
+    target="kitti360",
+)
+```
+
 ### Reading with all labels set to void (no ground truth)
 
 ```python
@@ -124,7 +168,35 @@ data = read_uklidar_tile(
     "data/uklidar/raw/test/my_tile.laz",
     label_all_void=True,
 )
-# All labels will be 8 (void), useful for pure inference
+# All labels will be 8 (void) for DALES, or 19 for KITTI-360
+```
+
+### Using the target configuration registry
+
+```python
+from src.datasets.uklidar import get_target_config, TARGET_CONFIGS
+
+# Get config for a specific target
+cfg = get_target_config("kitti360")
+print(cfg["num_classes"])    # 19
+print(cfg["void_label"])     # 19
+print(cfg["spt_model"])      # "spt-128"
+print(cfg["tiling"])         # "pc"
+
+# List available targets
+print(list(TARGET_CONFIGS.keys()))  # ['dales', 'kitti360']
+```
+
+### Reverse-mapping predictions back to ASPRS
+
+```python
+from src.datasets.uklidar import DALES_TO_ASPRS, KITTI360_TO_ASPRS
+
+# Convert DALES prediction labels back to ASPRS codes
+asprs_code = DALES_TO_ASPRS[predicted_label]
+
+# Convert KITTI-360 prediction labels back to ASPRS codes
+asprs_code = KITTI360_TO_ASPRS[predicted_label]
 ```
 
 ### Instantiating the dataset via Hydra
@@ -200,7 +272,7 @@ nag[1].show(keys=["mean_elevation"])
 
 | File | Purpose |
 |------|---------|
-| `src/datasets/uklidar.py` | Dataset class and LAS/LAZ reader |
+| `src/datasets/uklidar.py` | Dataset class, LAS/LAZ reader, and target config registry |
 | `src/datamodules/uklidar.py` | Lightning DataModule wrapper |
 | `configs/datamodule/semantic/uklidar.yaml` | Datamodule config (preprocessing, features, augmentations) |
 | `configs/experiment/semantic/uklidar.yaml` | Experiment config (model, trainer, overrides) |
@@ -218,3 +290,16 @@ The preprocessing parameters in `uklidar.yaml` mirror the DALES defaults. For be
 - `pcp_regularization` — controls superpoint granularity (lower = finer)
 - `knn` / `knn_r` — neighbourhood size for geometric feature computation
 - `ground_threshold` — height threshold for ground elevation estimation
+
+## Backwards compatibility
+
+All existing imports continue to work. The following aliases are provided:
+
+```python
+UKLIDAR_NUM_CLASSES   = DALES_NUM_CLASSES    # 8
+UKLIDAR_CLASS_NAMES   = DALES_CLASS_NAMES
+UKLIDAR_CLASS_COLORS  = DALES_CLASS_COLORS
+ASPRS_TO_TARGET       = ASPRS_TO_DALES
+```
+
+`read_uklidar_tile()` defaults to `target="dales"`, so existing calls without the `target` parameter behave identically to before.
