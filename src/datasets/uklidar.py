@@ -79,10 +79,10 @@ log = logging.getLogger(__name__)
 # DALES-compatible class definitions (default target)
 # ===========================================================================
 
-UKLIDAR_NUM_CLASSES = 8  # Matches DALES
+DALES_NUM_CLASSES = 8
 
 # class_names must have num_classes + 1 entries; the last is the void class
-UKLIDAR_CLASS_NAMES = [
+DALES_CLASS_NAMES = [
     'Ground',
     'Vegetation',
     'Cars',
@@ -95,7 +95,7 @@ UKLIDAR_CLASS_NAMES = [
 ]
 
 # class_colors must also have num_classes + 1 entries
-UKLIDAR_CLASS_COLORS = [
+DALES_CLASS_COLORS = [
     [128,  64,   0],   # ground — brown
     [  0, 128,   0],   # vegetation — green
     [255,   0,   0],   # cars — red
@@ -107,12 +107,12 @@ UKLIDAR_CLASS_COLORS = [
     [ 50,  50,  50],   # unknown / void — dark grey
 ]
 
-UKLIDAR_STUFF_CLASSES = [0, 1]  # Ground, Vegetation (same as DALES)
+DALES_STUFF_CLASSES = [0, 1]  # Ground, Vegetation (same as DALES)
 
 # ASPRS → DALES label mapping
 # Applied when reading classified UK LiDAR data.
 # For inference on unclassified data, all points get void label (8).
-ASPRS_TO_TARGET = {
+ASPRS_TO_DALES = {
     0: 8,   # Created/Never classified → void
     1: 8,   # Unclassified → void
     2: 0,   # Ground → ground
@@ -127,6 +127,91 @@ ASPRS_TO_TARGET = {
     20: 8,  # Permanent Structure → void
 }
 
+# DALES predictions → ASPRS codes (reverse mapping)
+DALES_TO_ASPRS = {
+    0: 2, 1: 5, 2: 1, 3: 1, 4: 14, 5: 13, 6: 15, 7: 6, 8: 1,
+}
+
+# Backwards-compatible aliases
+ASPRS_TO_TARGET = ASPRS_TO_DALES
+UKLIDAR_NUM_CLASSES = DALES_NUM_CLASSES
+UKLIDAR_CLASS_NAMES = DALES_CLASS_NAMES
+UKLIDAR_CLASS_COLORS = DALES_CLASS_COLORS
+UKLIDAR_STUFF_CLASSES = DALES_STUFF_CLASSES
+
+
+# ===========================================================================
+# KITTI-360-compatible class definitions
+# ===========================================================================
+
+KITTI360_NUM_CLASSES = 19
+
+KITTI360_CLASS_NAMES = {
+    0: "road", 1: "sidewalk", 2: "building", 3: "wall", 4: "fence",
+    5: "pole", 6: "traffic_light", 7: "traffic_sign", 8: "vegetation",
+    9: "terrain", 10: "sky", 11: "person", 12: "rider", 13: "car",
+    14: "truck", 15: "bus", 16: "train", 17: "motorcycle", 18: "bicycle",
+}
+
+KITTI360_CLASS_COLORS = [
+    [128, 64, 128],   [244, 35, 232],  [70, 70, 70],
+    [102, 102, 156],  [190, 153, 153], [153, 153, 153],
+    [250, 170, 30],   [220, 220, 0],   [107, 142, 35],
+    [152, 251, 152],  [70, 130, 180],  [220, 20, 60],
+    [255, 0, 0],      [0, 0, 142],     [0, 0, 70],
+    [0, 60, 100],     [0, 80, 100],    [0, 0, 230],
+    [119, 11, 32],
+]
+
+ASPRS_TO_KITTI360 = {
+    0: 19, 1: 19, 2: 9, 3: 8, 4: 8, 5: 8,
+    6: 2, 7: 19, 9: 19, 17: 19, 18: 19, 20: 3,
+}
+
+KITTI360_TO_ASPRS = {
+    0: 2, 1: 2, 2: 6, 3: 6, 4: 13, 5: 15,
+    6: 1, 7: 1, 8: 5, 9: 2, 10: 1, 11: 1,
+    12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1,
+}
+
+
+# ===========================================================================
+# Target configuration registry
+# ===========================================================================
+
+TARGET_CONFIGS = {
+    "dales": {
+        "num_classes": DALES_NUM_CLASSES,
+        "class_names": DALES_CLASS_NAMES,
+        "class_colors": DALES_CLASS_COLORS,
+        "asprs_to_target": ASPRS_TO_DALES,
+        "target_to_asprs": DALES_TO_ASPRS,
+        "void_label": 8,
+        "spt_model": "spt-64",
+        "tiling": "xy",
+    },
+    "kitti360": {
+        "num_classes": KITTI360_NUM_CLASSES,
+        "class_names": KITTI360_CLASS_NAMES,
+        "class_colors": KITTI360_CLASS_COLORS,
+        "asprs_to_target": ASPRS_TO_KITTI360,
+        "target_to_asprs": KITTI360_TO_ASPRS,
+        "void_label": 19,
+        "spt_model": "spt-128",
+        "tiling": "pc",
+    },
+}
+
+
+def get_target_config(target="dales"):
+    """Return the full config dict for a target dataset."""
+    if target not in TARGET_CONFIGS:
+        raise ValueError(
+            "Unknown target '{}'. Choose from: {}".format(
+                target, list(TARGET_CONFIGS.keys()))
+        )
+    return TARGET_CONFIGS[target]
+
 
 # ===========================================================================
 # Reader Function
@@ -134,8 +219,9 @@ ASPRS_TO_TARGET = {
 
 def read_uklidar_tile(
     filepath: str | Path,
+    target: str = "dales",
     remap: dict[int, int] | None = None,
-    void_label: int = 8,
+    void_label: int | None = None,
     label_all_void: bool = False,
 ) -> Data:
     """Read a colourised LAS/LAZ file and return an SPT-compatible
@@ -146,8 +232,10 @@ def read_uklidar_tile(
 
     Args:
         filepath:       Path to the LAS/LAZ file.
-        remap:          ASPRS → target label dict.  None = ASPRS_TO_TARGET.
-        void_label:     Label code for void/unlabeled points.
+        target:         Target dataset config ("dales" or "kitti360").
+        remap:          ASPRS → target label dict.  None = use target default.
+        void_label:     Label code for void/unlabeled points.  None = use
+                        target default.
         label_all_void: If True, set all labels to void (for inference
                         on data without ground truth).
 
@@ -155,8 +243,11 @@ def read_uklidar_tile(
         Data object with pos, rgb, intensity, y attributes.
     """
     filepath = Path(filepath)
+    cfg = get_target_config(target)
     if remap is None:
-        remap = ASPRS_TO_TARGET
+        remap = cfg["asprs_to_target"]
+    if void_label is None:
+        void_label = cfg["void_label"]
 
     # --- Read point cloud (PDAL or laspy) ---
     if HAS_PDAL:
