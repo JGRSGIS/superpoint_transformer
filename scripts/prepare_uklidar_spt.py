@@ -293,13 +293,18 @@ def read_las_cloud(
         rgb = np.zeros((n, 3), dtype=np.float32)
 
     # --- Intensity (normalise to [0, 1]) ---
+    # For DALES: match read_dales_tile() which clips to [0, 60000] / 60000
+    # For KITTI-360: simple max-normalisation (reader doesn't use intensity)
     if "Intensity" in dim_names:
         intensity_raw = points["Intensity"].astype(np.float32)
-        i_max = intensity_raw.max()
-        if i_max > 0:
-            intensity = (intensity_raw / i_max).reshape(-1, 1)
+        if target == "dales":
+            intensity = (np.clip(intensity_raw, 0, 60000) / 60000.0).reshape(-1, 1)
         else:
-            intensity = np.zeros((n, 1), dtype=np.float32)
+            i_max = intensity_raw.max()
+            if i_max > 0:
+                intensity = (intensity_raw / i_max).reshape(-1, 1)
+            else:
+                intensity = np.zeros((n, 1), dtype=np.float32)
     else:
         log.warning("  No Intensity channel found — setting to zeros")
         intensity = np.zeros((n, 1), dtype=np.float32)
@@ -333,66 +338,109 @@ def write_spt_ply(
     rgb: np.ndarray,
     intensity: np.ndarray,
     y: np.ndarray,
+    target: str = "dales",
 ) -> None:
     """Write an SPT-compatible PLY file.
 
     SPT's standard datasets read PLY files.  This function writes the
     point cloud in a format that SPT's preprocessing pipeline can ingest.
 
-    The PLY has columns: x, y, z, red, green, blue, intensity, label
-    where RGB are float [0,1] and intensity is float [0,1].
+    For **DALES** targets, the PLY uses element name ``testing`` with
+    columns: x, y, z, intensity, sem_class, ins_class (matching
+    ``read_dales_tile()``).
+
+    For **KITTI-360** targets, the PLY uses element name ``vertex`` with
+    columns: x, y, z, red, green, blue, semantic, instance (matching
+    ``read_kitti360_window()``).
     """
     try:
         from plyfile import PlyData, PlyElement
     except ImportError:
         # Fallback: write a simple ASCII PLY
-        _write_ply_ascii(filepath, pos, rgb, intensity, y)
+        _write_ply_ascii(filepath, pos, rgb, intensity, y, target)
         return
 
     n = len(pos)
-    vertex = np.zeros(n, dtype=[
-        ("x", "f4"), ("y", "f4"), ("z", "f4"),
-        ("red", "f4"), ("green", "f4"), ("blue", "f4"),
-        ("intensity", "f4"),
-        ("scalar_Classification", "i4"),
-    ])
-    vertex["x"] = pos[:, 0]
-    vertex["y"] = pos[:, 1]
-    vertex["z"] = pos[:, 2]
-    vertex["red"] = rgb[:, 0]
-    vertex["green"] = rgb[:, 1]
-    vertex["blue"] = rgb[:, 2]
-    vertex["intensity"] = intensity.ravel()
-    vertex["scalar_Classification"] = y.astype(np.int32)
 
-    el = PlyElement.describe(vertex, "vertex")
+    if target == "dales":
+        # DALES reader expects element "testing" with columns:
+        #   x, y, z, intensity, sem_class, ins_class
+        vertex = np.zeros(n, dtype=[
+            ("x", "f4"), ("y", "f4"), ("z", "f4"),
+            ("intensity", "f4"),
+            ("sem_class", "i4"),
+            ("ins_class", "i4"),
+        ])
+        vertex["x"] = pos[:, 0]
+        vertex["y"] = pos[:, 1]
+        vertex["z"] = pos[:, 2]
+        vertex["intensity"] = intensity.ravel()
+        vertex["sem_class"] = y.astype(np.int32)
+        vertex["ins_class"] = np.zeros(n, dtype=np.int32)
+        el = PlyElement.describe(vertex, "testing")
+    else:
+        # KITTI-360 reader expects element "vertex" with columns:
+        #   x, y, z, red, green, blue, semantic, instance
+        vertex = np.zeros(n, dtype=[
+            ("x", "f4"), ("y", "f4"), ("z", "f4"),
+            ("red", "f4"), ("green", "f4"), ("blue", "f4"),
+            ("semantic", "i4"),
+            ("instance", "i4"),
+        ])
+        vertex["x"] = pos[:, 0]
+        vertex["y"] = pos[:, 1]
+        vertex["z"] = pos[:, 2]
+        vertex["red"] = rgb[:, 0]
+        vertex["green"] = rgb[:, 1]
+        vertex["blue"] = rgb[:, 2]
+        vertex["semantic"] = y.astype(np.int32)
+        vertex["instance"] = np.zeros(n, dtype=np.int32)
+        el = PlyElement.describe(vertex, "vertex")
+
     PlyData([el], text=False).write(str(filepath))
 
 
-def _write_ply_ascii(filepath, pos, rgb, intensity, y):
+def _write_ply_ascii(filepath, pos, rgb, intensity, y, target="dales"):
     """Fallback ASCII PLY writer (no plyfile dependency)."""
     n = len(pos)
     filepath = Path(filepath)
     with open(filepath, "w") as f:
         f.write("ply\n")
         f.write("format ascii 1.0\n")
-        f.write(f"element vertex {n}\n")
-        f.write("property float x\n")
-        f.write("property float y\n")
-        f.write("property float z\n")
-        f.write("property float red\n")
-        f.write("property float green\n")
-        f.write("property float blue\n")
-        f.write("property float intensity\n")
-        f.write("property int scalar_Classification\n")
-        f.write("end_header\n")
 
-        for i in range(n):
-            f.write(
-                f"{pos[i, 0]:.6f} {pos[i, 1]:.6f} {pos[i, 2]:.6f} "
-                f"{rgb[i, 0]:.6f} {rgb[i, 1]:.6f} {rgb[i, 2]:.6f} "
-                f"{intensity.ravel()[i]:.6f} {int(y[i])}\n"
-            )
+        if target == "dales":
+            # DALES reader expects element "testing"
+            f.write(f"element testing {n}\n")
+            f.write("property float x\n")
+            f.write("property float y\n")
+            f.write("property float z\n")
+            f.write("property float intensity\n")
+            f.write("property int sem_class\n")
+            f.write("property int ins_class\n")
+            f.write("end_header\n")
+            for i in range(n):
+                f.write(
+                    f"{pos[i, 0]:.6f} {pos[i, 1]:.6f} {pos[i, 2]:.6f} "
+                    f"{intensity.ravel()[i]:.6f} {int(y[i])} 0\n"
+                )
+        else:
+            # KITTI-360 reader expects element "vertex"
+            f.write(f"element vertex {n}\n")
+            f.write("property float x\n")
+            f.write("property float y\n")
+            f.write("property float z\n")
+            f.write("property float red\n")
+            f.write("property float green\n")
+            f.write("property float blue\n")
+            f.write("property int semantic\n")
+            f.write("property int instance\n")
+            f.write("end_header\n")
+            for i in range(n):
+                f.write(
+                    f"{pos[i, 0]:.6f} {pos[i, 1]:.6f} {pos[i, 2]:.6f} "
+                    f"{rgb[i, 0]:.6f} {rgb[i, 1]:.6f} {rgb[i, 2]:.6f} "
+                    f"{int(y[i])} 0\n"
+                )
 
 
 # ===========================================================================
@@ -515,11 +563,19 @@ def process_file(
     else:
         rgb = np.zeros((n, 3), dtype=np.float32)
 
-    # Intensity → [0, 1]
+    # Intensity
+    # For DALES: write raw intensity — read_dales_tile() clips to [0, 60000]
+    # and divides by 60000 itself.  Pre-normalising here would cause
+    # double-normalisation (values near zero).
+    # For KITTI-360: intensity is not used by the reader (it uses RGB),
+    # so normalisation is irrelevant but we normalise for npy output.
     if "Intensity" in dim_names:
         raw_i = points["Intensity"].astype(np.float32)
-        i_max = raw_i.max()
-        intensity = (raw_i / i_max).reshape(-1, 1) if i_max > 0 else np.zeros((n, 1), dtype=np.float32)
+        if target == "dales":
+            intensity = raw_i.reshape(-1, 1)
+        else:
+            i_max = raw_i.max()
+            intensity = (raw_i / i_max).reshape(-1, 1) if i_max > 0 else np.zeros((n, 1), dtype=np.float32)
     else:
         intensity = np.zeros((n, 1), dtype=np.float32)
 
@@ -535,7 +591,7 @@ def process_file(
 
     if output_format == "ply":
         out_path = output_dir / f"{input_path.stem}.ply"
-        write_spt_ply(out_path, pos, rgb, intensity, y)
+        write_spt_ply(out_path, pos, rgb, intensity, y, target=target)
     elif output_format == "npy":
         out_path = output_dir / f"{input_path.stem}.npz"
         np.savez_compressed(
