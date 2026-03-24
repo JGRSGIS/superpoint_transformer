@@ -41,12 +41,35 @@ data_to_laz(nag[0], "output.laz", extra_attrs=["logits"])
 ```python
 from src.utils.export_laz import nag_to_laz
 
-# Level 0 = voxel-level (default)
+# Level 0 = voxel-level (default) — exports the full dense point cloud
 nag_to_laz(nag, "output.laz", level=0)
 
-# Level 1 = superpoint-level
+# Level 1 = superpoint-level — exports one point per superpoint (centroids)
 nag_to_laz(nag, "superpoints.laz", level=1)
 ```
+
+#### Understanding hierarchy levels
+
+SPT organises point clouds into a nested hierarchy (NAG):
+
+- **Level 0** contains the individual voxel-level points — the full dense
+  point cloud.
+- **Level 1** contains **superpoints** — clusters of level-0 points. Each
+  superpoint is represented by a single centroid (the mean position of all
+  points in the cluster). This means a level-1 export will look sparse: if
+  level 0 has 1 million points, level 1 might only have ~10 000 centroids.
+- Higher levels (2, 3, …) continue the hierarchy with progressively fewer,
+  coarser clusters.
+
+**If you want the full point cloud tagged with superpoint IDs**, export
+level 0 and include `super_index` as an extra attribute:
+
+```python
+nag_to_laz(nag, "output.laz", level=0, extra_attrs=["super_index"])
+```
+
+This writes every dense point with a `super_index` scalar dimension that
+identifies which superpoint each point belongs to.
 
 ## Exporting from saved HDF5 prediction files
 
