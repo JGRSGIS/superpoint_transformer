@@ -43,7 +43,7 @@ def _require_laspy():
         )
 
 
-def data_to_laz(data, path, extra_attrs=None):
+def data_to_laz(data, path, extra_attrs=None, class_mapping=None):
     """Export a single ``Data`` object (one NAG level) to a LAZ file.
 
     Parameters
@@ -56,6 +56,11 @@ def data_to_laz(data, path, extra_attrs=None):
     extra_attrs : list[str], optional
         Additional ``data`` attributes to write as extra scalar dimensions.
         Each must be a 1-D tensor of length N.
+    class_mapping : dict[int, int] or str, optional
+        Mapping from internal prediction indices to output classification
+        codes (e.g. ASPRS).  Pass a dict ``{train_id: asprs_code}``, or a
+        string key such as ``"dales"`` or ``"kitti360"`` to use a built-in
+        mapping from ``src.datasets.uklidar.TARGET_CONFIGS``.
     """
     laspy = _require_laspy()
     import torch
@@ -68,9 +73,18 @@ def data_to_laz(data, path, extra_attrs=None):
 
     n = pos.shape[0]
 
-    # Use point format 2 (XYZ + RGB) if RGB is available, else format 0
+    # Resolve class_mapping from string key if needed
+    if isinstance(class_mapping, str):
+        from src.datasets.uklidar import get_target_config
+        cfg = get_target_config(class_mapping)
+        class_mapping = cfg["target_to_asprs"]
+
+    # Use point format 7 (XYZ + RGB, 8-bit classification) if RGB is
+    # available, else format 6 (8-bit classification).  Formats 6+ are
+    # LAS 1.4 and support classification values 0-255, avoiding the
+    # 5-bit (0-31) limitation of legacy formats 0-5.
     has_rgb = getattr(data, 'rgb', None) is not None
-    point_format = 2 if has_rgb else 0
+    point_format = 7 if has_rgb else 6
 
     header = laspy.LasHeader(point_format=point_format, version="1.4")
     header.offsets = pos.min(axis=0)
@@ -106,6 +120,10 @@ def data_to_laz(data, path, extra_attrs=None):
         pred = data.semantic_pred
         if isinstance(pred, torch.Tensor):
             pred = pred.cpu().numpy()
+        if class_mapping is not None:
+            mapped = np.vectorize(
+                lambda v: class_mapping.get(int(v), 0))(pred)
+            pred = mapped
         las.classification = pred.astype(np.uint8)
 
     # Ground-truth labels → extra scalar dimension
@@ -116,6 +134,8 @@ def data_to_laz(data, path, extra_attrs=None):
         # y can be a 2D histogram; store argmax if so
         if y.ndim == 2:
             y = y.argmax(axis=1)
+        if class_mapping is not None:
+            y = np.vectorize(lambda v: class_mapping.get(int(v), 0))(y)
         las.add_extra_dim(
             laspy.ExtraBytesParams(name="ground_truth", type=np.uint8))
         las.ground_truth = y.astype(np.uint8)
@@ -150,7 +170,7 @@ def data_to_laz(data, path, extra_attrs=None):
     log.info("Exported %d points to %s", n, path)
 
 
-def nag_to_laz(nag, path, level=0, extra_attrs=None):
+def nag_to_laz(nag, path, level=0, extra_attrs=None, class_mapping=None):
     """Export a NAG level to a LAZ file.
 
     Parameters
@@ -165,9 +185,13 @@ def nag_to_laz(nag, path, level=0, extra_attrs=None):
         superpoint-level data.  Default is ``0``.
     extra_attrs : list[str], optional
         Additional attributes to include as extra LAZ dimensions.
+    class_mapping : dict[int, int] or str, optional
+        Mapping from internal prediction indices to output classification
+        codes.  See :func:`data_to_laz` for details.
     """
     data = nag[level]
-    data_to_laz(data, path, extra_attrs=extra_attrs)
+    data_to_laz(data, path, extra_attrs=extra_attrs,
+                class_mapping=class_mapping)
 
 
 # ---------------------------------------------------------------------------
@@ -193,10 +217,16 @@ if __name__ == '__main__':
     parser.add_argument(
         "--extra-attrs", nargs="*", default=None,
         help="Additional data attributes to include as extra dimensions")
+    parser.add_argument(
+        "--class-mapping", type=str, default=None,
+        help="Map prediction indices to ASPRS codes. Use a built-in target "
+             "name (e.g. 'dales', 'kitti360') or omit to write raw indices.")
     args = parser.parse_args()
 
     from src.data import NAG
 
     nag = NAG.load(args.input)
-    nag_to_laz(nag, args.output, level=args.level, extra_attrs=args.extra_attrs)
+    nag_to_laz(nag, args.output, level=args.level,
+               extra_attrs=args.extra_attrs,
+               class_mapping=args.class_mapping)
     print(f"Done. Wrote {args.output}")
