@@ -38,6 +38,7 @@ from .widgets import *
 from .ground import *
 from .batch_utils import *
 from .version import *
+from .export_laz import *
 
 # from .connected_components import * # circular import (bcs of `from src.data import *`)
 # from .components_merge import *
