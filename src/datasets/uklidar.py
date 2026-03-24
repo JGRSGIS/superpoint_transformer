@@ -164,14 +164,45 @@ KITTI360_CLASS_COLORS = [
 ]
 
 ASPRS_TO_KITTI360 = {
-    0: 19, 1: 19, 2: 9, 3: 8, 4: 8, 5: 8,
-    6: 2, 7: 19, 9: 19, 17: 19, 18: 19, 20: 3,
+    0: 19,   # Never classified -> void
+    1: 19,   # Unassigned -> void
+    2: 9,    # Ground -> terrain
+    3: 8,    # Low Vegetation -> vegetation
+    4: 8,    # Medium Vegetation -> vegetation
+    5: 8,    # High Vegetation -> vegetation
+    6: 2,    # Building -> building
+    7: 19,   # Low Point -> void
+    9: 19,   # Water -> void
+    10: 19,  # Rail -> void (no trainId in KITTI-360)
+    11: 0,   # Road Surface -> road
+    13: 19,  # Wire - Guard -> void
+    14: 19,  # Wire - Conductor -> void
+    15: 5,   # Transmission Tower -> pole
+    16: 19,  # Wire-Structure Connector -> void
+    17: 19,  # Bridge Deck -> void
+    18: 19,  # High Noise -> void
 }
 
 KITTI360_TO_ASPRS = {
-    0: 2, 1: 2, 2: 6, 3: 6, 4: 13, 5: 15,
-    6: 1, 7: 1, 8: 5, 9: 2, 10: 1, 11: 1,
-    12: 1, 13: 1, 14: 1, 15: 1, 16: 1, 17: 1, 18: 1, 19: 1,
+    0: 11,   # road -> Road Surface
+    1: 11,   # sidewalk -> Road Surface
+    2: 6,    # building -> Building
+    3: 64,   # wall -> User Definable
+    4: 65,   # fence -> User Definable
+    5: 66,   # pole -> User Definable
+    6: 67,   # traffic light -> User Definable
+    7: 68,   # traffic sign -> User Definable
+    8: 5,    # vegetation -> High Vegetation
+    9: 2,    # terrain -> Ground
+    10: 69,  # sky -> User Definable
+    11: 70,  # person -> User Definable
+    12: 71,  # rider -> User Definable
+    13: 72,  # car -> User Definable
+    14: 73,  # truck -> User Definable
+    15: 74,  # bus -> User Definable
+    16: 75,  # train -> User Definable
+    17: 76,  # motorcycle -> User Definable
+    18: 77,  # bicycle -> User Definable
 }
 
 

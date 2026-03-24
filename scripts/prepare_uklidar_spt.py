@@ -166,18 +166,23 @@ ASPRS_TO_DALES = {
 
 # ASPRS → KITTI-360 label mapping
 ASPRS_TO_KITTI360 = {
-    0: 19,  # Created/Never classified → void
-    1: 19,  # Unclassified → void
-    2: 9,   # Ground → terrain
-    3: 8,   # Low Vegetation → vegetation
-    4: 8,   # Medium Vegetation → vegetation
-    5: 8,   # High Vegetation → vegetation
-    6: 2,   # Building → building
-    7: 19,  # Low Point (Noise) → void
-    9: 19,  # Water → void
-    17: 19, # Bridge Deck → void
-    18: 19, # High Noise → void
-    20: 3,  # Permanent Structure → wall
+    0: 19,   # Never classified -> void
+    1: 19,   # Unassigned -> void
+    2: 9,    # Ground -> terrain
+    3: 8,    # Low Vegetation -> vegetation
+    4: 8,    # Medium Vegetation -> vegetation
+    5: 8,    # High Vegetation -> vegetation
+    6: 2,    # Building -> building
+    7: 19,   # Low Point -> void
+    9: 19,   # Water -> void
+    10: 19,  # Rail -> void (no trainId in KITTI-360)
+    11: 0,   # Road Surface -> road
+    13: 19,  # Wire - Guard -> void
+    14: 19,  # Wire - Conductor -> void
+    15: 5,   # Transmission Tower -> pole
+    16: 19,  # Wire-Structure Connector -> void
+    17: 19,  # Bridge Deck -> void
+    18: 19,  # High Noise -> void
 }
 
 TARGET_CONFIGS = {
