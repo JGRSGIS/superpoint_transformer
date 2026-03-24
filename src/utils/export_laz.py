@@ -63,7 +63,7 @@ def data_to_laz(data, path, extra_attrs=None):
     path = Path(path)
     pos = data.pos
     if isinstance(pos, torch.Tensor):
-        pos = pos.numpy()
+        pos = pos.cpu().numpy()
     pos = pos.astype(np.float64)
 
     n = pos.shape[0]
@@ -86,7 +86,7 @@ def data_to_laz(data, path, extra_attrs=None):
     if has_rgb:
         rgb = data.rgb
         if isinstance(rgb, torch.Tensor):
-            rgb = rgb.numpy()
+            rgb = rgb.cpu().numpy()
         rgb = np.clip(rgb, 0.0, 1.0)
         las.red = (rgb[:, 0] * 65535).astype(np.uint16)
         las.green = (rgb[:, 1] * 65535).astype(np.uint16)
@@ -96,7 +96,7 @@ def data_to_laz(data, path, extra_attrs=None):
     if getattr(data, 'intensity', None) is not None:
         intensity = data.intensity
         if isinstance(intensity, torch.Tensor):
-            intensity = intensity.numpy()
+            intensity = intensity.cpu().numpy()
         intensity = np.squeeze(intensity)
         las.intensity = (np.clip(intensity, 0.0, 1.0) * 65535).astype(
             np.uint16)
@@ -105,14 +105,14 @@ def data_to_laz(data, path, extra_attrs=None):
     if getattr(data, 'semantic_pred', None) is not None:
         pred = data.semantic_pred
         if isinstance(pred, torch.Tensor):
-            pred = pred.numpy()
+            pred = pred.cpu().numpy()
         las.classification = pred.astype(np.uint8)
 
     # Ground-truth labels → extra scalar dimension
     if getattr(data, 'y', None) is not None:
         y = data.y
         if isinstance(y, torch.Tensor):
-            y = y.numpy()
+            y = y.cpu().numpy()
         # y can be a 2D histogram; store argmax if so
         if y.ndim == 2:
             y = y.argmax(axis=1)
@@ -127,7 +127,7 @@ def data_to_laz(data, path, extra_attrs=None):
             log.warning("Attribute %r not found on data, skipping", attr_name)
             continue
         if isinstance(val, torch.Tensor):
-            val = val.numpy()
+            val = val.cpu().numpy()
         val = np.squeeze(val)
         if val.shape[0] != n:
             log.warning(
